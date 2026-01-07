@@ -2,8 +2,8 @@ name: Morning Greeting
 
 on:
   schedule:
-    # Run at minute 0 past every hour
-    - cron: '0 * * * *'
+    # Run every hour from 09:00 to 15:00 Beijing Time (01:00 to 07:00 UTC)
+    - cron: '0 1-7 * * *'
   # Allow manual trigger for testing via GitHub UI
   workflow_dispatch:
 
