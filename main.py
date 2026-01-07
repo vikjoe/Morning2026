@@ -6,9 +6,14 @@ import pytz
 from bs4 import BeautifulSoup
 import yaml
 import glob
+import json
+import hashlib
+import subprocess
 
 # 默认设置
 CONFIG_DIR = "COMM-CFG"
+DATA_DIR = "data"
+RECORD_FILE = os.path.join(DATA_DIR, "processed_records.json")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 def load_configs():
@@ -29,6 +34,47 @@ def load_configs():
         except Exception as e:
             print(f"Error loading {file_path}: {e}")
     return configs
+
+def get_item_hash(item):
+    """计算单条数据的唯一指纹"""
+    # 组合关键字段: 日期 + 名称 + 价格 + 商家 + 规格
+    unique_str = f"{item['date_str']}_{item['name']}_{item['price']}_{item['company']}_{item['spec']}"
+    return hashlib.md5(unique_str.encode('utf-8')).hexdigest()
+
+def load_processed_records():
+    """加载已处理记录"""
+    if not os.path.exists(RECORD_FILE):
+        return {"date": "", "hashes": []}
+    try:
+        with open(RECORD_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {"date": "", "hashes": []}
+
+def save_processed_records(records):
+    """保存记录到文件"""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    
+    with open(RECORD_FILE, 'w', encoding='utf-8') as f:
+        json.dump(records, f, indent=2, ensure_ascii=False)
+
+def git_commit_changes():
+    """将状态文件的变更提交回 Git"""
+    try:
+        # 配置 git 用户 (如果是 GitHub Actions 环境)
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        
+        # Add & Commit & Push
+        subprocess.run(["git", "add", RECORD_FILE], check=True)
+        # 只有在有变动时 commit 才会成功，否则会由 git 返回 exit 1 (或只是 no output)
+        # 我们忽略 commit 的错误（比如无变更时）
+        subprocess.run(["git", "commit", "-m", "Update processed records [skip ci]"], check=False)
+        subprocess.run(["git", "push"], check=True)
+        print("已成功提交状态记录更新。")
+    except Exception as e:
+        print(f"Git 提交失败 (本地运行可忽略): {e}")
 
 def get_price_data(config):
     """根据配置爬取数据，并进行关键词过滤"""
@@ -53,9 +99,8 @@ def get_price_data(config):
             return []
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table') # 假设主要数据还在第一个table或特定class
+        table = soup.find('table')
         if not table:
-             # 尝试找 class="lp-table"
             table = soup.find('table', class_='lp-table')
         
         if not table:
@@ -79,8 +124,7 @@ def get_price_data(config):
             company = cols[6].get_text(strip=True)
             date_str = cols[7].get_text(strip=True)
             
-            # 1. 关键词过滤 (如果包含无效关键字，直接跳过)
-            # 检查字段: 商品名、规格、商家、价格
+            # 1. 关键词过滤
             full_text = f"{product_name} {spec} {price} {company}"
             is_invalid = False
             for kw in invalid_keywords:
@@ -95,7 +139,7 @@ def get_price_data(config):
             try:
                 row_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 all_prices.append({
-                    "name": name, # 使用配置中的统称
+                    "name": name, 
                     "raw_name": product_name,
                     "spec": spec,
                     "price": price,
@@ -111,12 +155,11 @@ def get_price_data(config):
 
     return all_prices
 
-def organize_data(all_prices):
+def organize_data(all_prices, sent_hashes):
     """
     整理数据:
     1. 分离 '今日'(Today) 和 '昨日'(Yesterday)。
-    2. 昨日数据只取最后3条有效报价。
-    3. 全部按时间倒序排列 (越新越上面)。
+    2. 标记 '今日' 数据中的 '新增' (New) 数据。
     """
     tz = pytz.timezone('Asia/Shanghai')
     today = datetime.now(tz).date()
@@ -124,47 +167,36 @@ def organize_data(all_prices):
     
     today_data = []
     yesterday_data = []
+    new_items_count = 0
     
     for item in all_prices:
+        item_hash = get_item_hash(item)
+        item['is_new'] = False
+        
         if item['date'] == today:
+            # Check if this hash has been sent
+            if item_hash not in sent_hashes:
+                item['is_new'] = True
+                new_items_count += 1
             today_data.append(item)
+            
         elif item['date'] == yesterday:
             yesterday_data.append(item)
     
-    # 排序: 越新越上面 (日期其实是一样的，这里主要依赖原始网页顺序，通常网页是倒序的吗？)
-    # 假设网页是按时间倒序(最新在最上)，或者正序。
-    # 生意社列表通常是 最新在最上。我们保持列表顺序即可，或者显式依赖抓取顺序。
-    # 这里我们信任网页顺序，但为了保险，不做额外排序，假设爬虫抓下来是从上到下的。
-    # 如果需要时间排序，需要更精确的时间字段，但网页只有日期。
+    # 昨日数据只取最新的3条
+    yesterday_slice = yesterday_data[:3]
     
-    # 按照需求：越新的在上面。
-    # 生意社默认是从上往下是：最新 -> 最旧。
-    # 所以 list[0] 是最新的。
-    
-    # 昨日数据：取“最后三条有效报价”。
-    # “最后”在时间轴上意味着“最晚”，即列表的最上面。
-    # “三条”
-    yesterday_slice = yesterday_data[:3] # 取最新的3条
-    
-    return today_data, yesterday_slice
+    return today_data, yesterday_slice, new_items_count
 
 def send_notification(today_data, yesterday_data):
     if not PUSHPLUS_TOKEN:
-        print("未找到 PUSHPLUS_TOKEN，跳过推送")
-        return
-        
-    if not today_data and not yesterday_data:
-        print("今日和昨日均无有效数据，不推送。")
-        return
+        print("未找到 PUSHPLUS_TOKEN (环境变量)，无法推送。")
+        return False
 
     tz = pytz.timezone('Asia/Shanghai')
     now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
     
-    title = f"商品报价日报 ({now_str})"
-    
-    # 构建 HTML
-    # 样式：越新越上面。
-    # 我们先展示 Today (Highlight), 然后 Yesterday.
+    title = f"📢 商品报价更新 ({now_str})"
     
     html = f"<h3>📅 报价更新 ({now_str})</h3>"
     
@@ -179,18 +211,26 @@ def send_notification(today_data, yesterday_data):
     """
     
     # 1. 今日数据 (HighLight)
-    # 背景色淡黄色或淡红色提示
     for item in today_data:
+        # 如果是本次新增，给予最醒目的标记
+        if item.get('is_new'):
+            row_style = "background-color: #ffcdd2; font-weight: bold; border: 2px solid red;"
+            date_display = f"{item['date_str']} <span style='background:red;color:white;padding:2px;border-radius:4px;'>NEW</span>"
+        else:
+            # 之前已发的今日数据，普通高亮
+            row_style = "background-color: #fff9c4;"
+            date_display = item['date_str']
+
         html += f"""
-        <tr style="background-color: #fff9c4; font-weight: bold;">
-            <td style="color: #d32f2f;">{item['date_str']} (新)</td>
+        <tr style="{row_style}">
+            <td style="color: #d32f2f;">{date_display}</td>
             <td>{item['raw_name']}<br><span style="font-size:12px;color:gray;">{item['spec']}</span></td>
             <td style="color: red; font-size: 16px;">{item['price']}</td>
             <td>{item['company']}</td>
         </tr>
         """
         
-    # 2. 昨日数据 (Greyed out / Normal)
+    # 2. 昨日数据 (Greyed out)
     for item in yesterday_data:
         html += f"""
         <tr style="background-color: #f5f5f5; color: #666;">
@@ -202,7 +242,7 @@ def send_notification(today_data, yesterday_data):
         """
         
     html += "</table>"
-    html += "<p style='font-size:12px; color: gray;'>注: 黄色高亮为今日最新数据，灰色为昨日参考(最近3条)。</p>"
+    html += "<p style='font-size:12px; color: gray;'>注: 红色框为最新发现的报价，黄色为今日已发过的报价，灰色为昨日参考。</p>"
     
     # 发送
     url = "http://www.pushplus.plus/send"
@@ -216,32 +256,55 @@ def send_notification(today_data, yesterday_data):
     try:
         resp = requests.post(url, json=payload)
         print(f"推送响应: {resp.text}")
+        if resp.status_code == 200:
+            return True
     except Exception as e:
         print(f"推送失败: {e}")
+        return False
+    
+    return False
 
 def main():
     configs = load_configs()
-    if not configs:
-        print("没有找到配置文件。")
-        return
-
-    all_fetched_items = []
+    records = load_processed_records()
     
+    # 检查是否跨天，如果是新的一天，重置记录
+    tz = pytz.timezone('Asia/Shanghai')
+    today_str = datetime.now(tz).strftime('%Y-%m-%d')
+    
+    if records["date"] != today_str:
+        print(f"检测到新的一天 ({today_str})，重置发送记录。")
+        records["date"] = today_str
+        records["hashes"] = []
+    
+    sent_hashes = set(records["hashes"]) # 使用集合加速查找
+    
+    all_fetched_items = []
     for config in configs:
         items = get_price_data(config)
         all_fetched_items.extend(items)
+    
+    # 整理数据，计算哪些是新的
+    today_data, yesterday_data, new_count = organize_data(all_fetched_items, sent_hashes)
+    
+    print(f"今日数据: {len(today_data)} 条, 其中新增: {new_count} 条")
+    
+    if new_count > 0:
+        print("发现新报价，准备发送推送...")
+        success = send_notification(today_data, yesterday_data)
         
-    # 按商品分组处理，还是汇总处理？
-    # 用户需求好像是汇总发一个推送。
-    # 但如果为了排序 "越新的报价越在上面"，应该是全局排序。
-    
-    # 即使是多个商品，也可以混合在一起按日期排。
-    # 不过通常我们希望按商品归类。
-    # 鉴于目前只有一个商品丁二烯，我们先不做复杂的商品分组，直接全局处理。
-    
-    today_data, yesterday_data = organize_data(all_fetched_items)
-    
-    send_notification(today_data, yesterday_data)
+        if success:
+            # 发送成功后，更新记录
+            print("更新本地状态记录...")
+            for item in today_data:
+                if item.get('is_new'):
+                    item_hash = get_item_hash(item)
+                    records["hashes"].append(item_hash)
+            
+            save_processed_records(records)
+            git_commit_changes()
+    else:
+        print("没有发现新的有效报价，本轮不发送推送。")
 
 if __name__ == "__main__":
     main()
