@@ -2,9 +2,8 @@ name: Morning Greeting
 
 on:
   schedule:
-    # UTC time 01:00 corresponds to Beijing time 09:00
-    # Cron format: minute hour day month day-of-week
-    - cron: '0 1 * * *'
+    # Run at minute 0 past every hour
+    - cron: '0 * * * *'
   # Allow manual trigger for testing via GitHub UI
   workflow_dispatch:
 
