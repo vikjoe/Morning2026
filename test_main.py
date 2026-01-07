@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import sys
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 import pytz
 
 # Add current directory to path to import main
@@ -21,10 +21,12 @@ class TestMorning2026(unittest.TestCase):
         self.tz = pytz.timezone('Asia/Shanghai')
 
     @patch('glob.glob')
+    @patch('os.path.exists') # Patch file system check
     @patch('builtins.open', new_callable=mock_open, read_data="name: Test\nurl: http://test")
     @patch('yaml.safe_load')
-    def test_load_configs(self, mock_yaml, mock_file, mock_glob):
-        # Mock glob to iterate once
+    def test_load_configs(self, mock_yaml, mock_file, mock_exists, mock_glob):
+        # Mock checks
+        mock_exists.return_value = True # Pretend directory exists
         mock_glob.return_value = ['fake/path/test.yaml']
         mock_yaml.return_value = self.sample_config
         
@@ -34,8 +36,11 @@ class TestMorning2026(unittest.TestCase):
 
     @patch('requests.get')
     def test_get_price_data_success(self, mock_get):
+        # Use dynamic date to ensure test always passes regardless of run date
+        today_str = datetime.now(self.tz).strftime('%Y-%m-%d')
+        
         # Mock HTML response
-        html_content = """
+        html_content = f"""
         <html>
         <table class="lp-table">
             <tr><th>Header</th></tr>
@@ -47,20 +52,42 @@ class TestMorning2026(unittest.TestCase):
                 <td>TypeA</td>
                 <td>LocA</td>
                 <td>CompanyA</td>
-                <td>2026-01-07</td> <!-- Today -->
+                <td>[Date]</td> <!-- Placeholder -->
+                <td>{today_str}</td> <!-- Date col is 8th (index 7), waiting... let's check parse logic -->
             </tr>
         </table>
         </html>
         """
+        # Wait, the main.py logic says:
+        # product_name = cols[0]
+        # date_str = cols[7]
+        # So we need 8 cols.
+        # My HTML above:
+        # 0:Product, 1:Spec, 2:Brand, 3:Price(1000), 4:Type, 5:Loc, 6:Comp, 7:Date
+        
+        html_content = f"""
+        <html>
+        <table class="lp-table">
+            <tr><th>Header</th></tr>
+            <tr>
+                <td>ProductA</td>
+                <td>SpecA</td>
+                <td>BrandA</td>
+                <td>1000</td>
+                <td>TypeA</td>
+                <td>LocA</td>
+                <td>CompanyA</td>
+                <td>{today_str}</td>
+            </tr>
+        </table>
+        </html>
+        """
+        
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = html_content
         mock_get.return_value = mock_response
 
-        # Mock datetime in main to ensure '2026-01-07' is treated correctly if needed
-        # But get_price_data doesn't strictly filter deep logic, just extracts.
-        # Wait, get_price_data DOES filtering logic for invalid keywords.
-        
         data = main.get_price_data(self.sample_config)
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['price'], '1000')
@@ -68,8 +95,9 @@ class TestMorning2026(unittest.TestCase):
 
     @patch('requests.get')
     def test_get_price_data_invalid_keyword(self, mock_get):
+        today_str = datetime.now(self.tz).strftime('%Y-%m-%d')
         # Mock HTML with invalid keyword "invalid" defined in setup
-        html_content = """
+        html_content = f"""
         <html>
         <table>
             <tr><th>Header</th></tr>
@@ -81,7 +109,7 @@ class TestMorning2026(unittest.TestCase):
                 <td>TypeA</td>
                 <td>LocA</td>
                 <td>invalid company</td> 
-                <td>2026-01-07</td>
+                <td>{today_str}</td>
             </tr>
         </table>
         </html>
@@ -104,7 +132,7 @@ class TestMorning2026(unittest.TestCase):
             {'date': yesterday, 'name': 'Item2', 'price': '20'},
             {'date': yesterday, 'name': 'Item3', 'price': '30'},
             {'date': yesterday, 'name': 'Item4', 'price': '40'},
-            {'date': yesterday, 'name': 'Item5', 'price': '50'}, # 4th yesterday item
+            {'date': yesterday, 'name': 'Item5', 'price': '50'},
             {'date': old_day, 'name': 'Item6', 'price': '60'},
         ]
 
@@ -113,9 +141,7 @@ class TestMorning2026(unittest.TestCase):
         self.assertEqual(len(today_res), 1)
         self.assertEqual(today_res[0]['name'], 'Item1')
 
-        # Yesterday should only have 3 items (sliced [:3])
         self.assertEqual(len(yesterday_res), 3)
-        # Should be Item2, Item3, Item4 if list order is preserved
         self.assertEqual(yesterday_res[0]['name'], 'Item2') 
         
     @patch('requests.post')
@@ -124,7 +150,7 @@ class TestMorning2026(unittest.TestCase):
         mock_post.return_value.text = "success"
         
         today_data = [{'date_str': '2026-01-07', 'raw_name': 'N', 'spec': 'S', 'price': '100', 'company': 'C'}]
-        yesterday_data = [] # empty
+        yesterday_data = []
 
         main.send_notification(today_data, yesterday_data)
         
