@@ -24,7 +24,7 @@ class TestMorning2026(unittest.TestCase):
     @patch('os.path.exists') # Patch file system check
     @patch('builtins.open', new_callable=mock_open, read_data="name: Test\nurl: http://test")
     @patch('yaml.safe_load')
-    def test_load_configs(self, mock_yaml, mock_file, mock_exists, mock_glob):
+    def test_load_configs(self, mock_glob, mock_exists, mock_file, mock_yaml):
         # Mock checks
         mock_exists.return_value = True # Pretend directory exists
         mock_glob.return_value = ['fake/path/test.yaml']
