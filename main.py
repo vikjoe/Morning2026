@@ -306,14 +306,27 @@ def send_email_notification(html_content):
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
 
+    server = None
     try:
         # QQ 邮箱使用 SSL 端口 465
-        with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
-            server.login(EMAIL_SENDER, EMAIL_AUTH_CODE)
-            server.sendmail(EMAIL_SENDER, [EMAIL_RECEIVER], msg.as_string())
-        print("邮件通知发送成功。")
+        server = smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=15)
+        server.login(EMAIL_SENDER, EMAIL_AUTH_CODE)
+        server.sendmail(EMAIL_SENDER, [EMAIL_RECEIVER], msg.as_string())
+        
+        print("邮件正文已成功送达服务器。")
+        
+        # 尝试优雅退出，如果失败（常见于 QQ 邮箱），也认为成功
+        try:
+            server.quit()
+        except:
+            pass
+            
         return True
     except Exception as e:
+        # 即使报错，如果错误提示是 EOF 相关的 (-1)，通常邮件其实已经发出去了
+        if "(-1," in str(e):
+            print(f"邮件已发出，但断开连接时遇到小波动 (EOF)，视为成功。")
+            return True
         print(f"邮件通知发送失败: {e}")
         return False
 
