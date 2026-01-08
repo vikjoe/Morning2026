@@ -96,14 +96,17 @@ class TestPriceMonitor(unittest.TestCase):
         main.EMAIL_AUTH_CODE = "authcode"
         main.EMAIL_RECEIVER = "receiver@qq.com"
         
-        instance = mock_smtp.return_value.__enter__.return_value
+        # 模拟 SMTP_SSL 对象
+        mock_instance = MagicMock()
+        mock_smtp.return_value = mock_instance
         
         test_html = "<html>Email Content</html>"
         res = main.send_email_notification(test_html)
         
         self.assertTrue(res)
-        instance.login.assert_called_with("sender@qq.com", "authcode")
-        instance.sendmail.assert_called()
+        # 验证是否调用了 login 和 sendmail
+        mock_instance.login.assert_called_with("sender@qq.com", "authcode")
+        mock_instance.sendmail.assert_called()
 
 if __name__ == '__main__':
     unittest.main()

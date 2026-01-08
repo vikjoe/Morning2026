@@ -1,6 +1,7 @@
 import os
 import requests
 import io
+import sys
 from datetime import datetime, timedelta
 import pytz
 from bs4 import BeautifulSoup
@@ -12,6 +13,14 @@ import subprocess
 import smtplib
 from email.mime.text import MIMEText
 from email.header import Header
+
+# 强制设置终端输出为 UTF-8 编码，防止 Windows 乱码
+if sys.stdout.encoding != 'utf-8':
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    except Exception:
+        pass
 
 # 默认设置
 CONFIG_DIR = "COMM-CFG"
