@@ -85,7 +85,7 @@ def get_price_data(config):
     print(f"正在获取 {name} 的报价信息...")
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
     all_prices = []
@@ -104,17 +104,24 @@ def get_price_data(config):
             table = soup.find('table', class_='lp-table')
         
         if not table:
-            print(f"[{name}] 未找到数据表格")
+            print(f"[{name}] 未找到数据表格 (len(response.text)={len(response.text)})")
+            # Debug: 打印前500个字符看看是不是验证码页面
+            print(f"Response head: {response.text[:200]}...")
             return []
 
         rows = table.find_all('tr')
+        print(f"[{name}] 找到表格，行数: {len(rows)}")
+        
         if len(rows) < 2:
             return []
 
         # 解析数据
-        for row in rows[1:]:
+        for i, row in enumerate(rows[1:]):
             cols = row.find_all('td')
+            # Debug log for first row failure
             if len(cols) < 8:
+                if i == 0:
+                    print(f"[{name}] 第一行数据列数不足 ({len(cols)}), 跳过: {[c.get_text(strip=True) for c in cols]}")
                 continue
             
             # 解析原始文本
@@ -130,6 +137,8 @@ def get_price_data(config):
             for kw in invalid_keywords:
                 if kw in full_text:
                     is_invalid = True
+                    # Debug log
+                    if i < 3: print(f"[{name}] 过滤关键字 '{kw}': {company}")
                     break
             
             if is_invalid:
