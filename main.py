@@ -284,6 +284,10 @@ def send_notification(today_data, yesterday_data):
     return False
 
 def main():
+    tz = pytz.timezone('Asia/Shanghai')
+    now = datetime.now(tz)
+    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 脚本启动，准备执行任务...")
+    
     configs = load_configs()
     records = load_processed_records()
     
