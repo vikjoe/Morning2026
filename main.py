@@ -99,30 +99,40 @@ def get_price_data(config):
             return []
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table')
-        if not table:
-            table = soup.find('table', class_='lp-table')
         
-        if not table:
-            print(f"[{name}] 未找到数据表格 (len(response.text)={len(response.text)})")
-            # Debug: 打印前500个字符看看是不是验证码页面
-            print(f"Response head: {response.text[:200]}...")
+        # 优化: 尝试多个可能的表格选择器，确保抓到的是数据表而不是导航表
+        target_table = None
+        
+        # 优先级1: 带有特定类的表格
+        for cls in ['list-tbl', 'lp-table']:
+            t = soup.find('table', class_=cls)
+            if t:
+                target_table = t
+                break
+        
+        # 优先级2: 遍历所有表格，寻找包含关键词的表格
+        if not target_table:
+            tables = soup.find_all('table')
+            for t in tables:
+                if "商品名称" in t.get_text() or "报价" in t.get_text():
+                    target_table = t
+                    break
+
+        if not target_table:
+            print(f"[{name}] 未找到有效的数据表格。页面长度: {len(response.text)}")
             return []
 
-        rows = table.find_all('tr')
-        print(f"[{name}] 找到表格，行数: {len(rows)}")
+        rows = target_table.find_all('tr')
         
-        if len(rows) < 2:
-            return []
-
         # 解析数据
-        for i, row in enumerate(rows[1:]):
+        valid_row_count = 0
+        for i, row in enumerate(rows):
             cols = row.find_all('td')
-            # Debug log for first row failure
+            # 必须满足至少 8 列 (商品, 规格, 厂家, 价格, 类型, 地区, 交易商, 日期)
             if len(cols) < 8:
-                if i == 0:
-                    print(f"[{name}] 第一行数据列数不足 ({len(cols)}), 跳过: {[c.get_text(strip=True) for c in cols]}")
                 continue
+            
+            valid_row_count += 1
             
             # 解析原始文本
             product_name = cols[0].get_text(strip=True)
@@ -137,14 +147,12 @@ def get_price_data(config):
             for kw in invalid_keywords:
                 if kw in full_text:
                     is_invalid = True
-                    # Debug log
-                    if i < 3: print(f"[{name}] 过滤关键字 '{kw}': {company}")
                     break
             
             if is_invalid:
                 continue
                 
-            # 2. 格式化数据
+            # 2. 格式化数据并存入
             try:
                 row_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 all_prices.append({
@@ -158,6 +166,8 @@ def get_price_data(config):
                 })
             except ValueError:
                 continue
+        
+        print(f"[{name}] 扫描完毕。总行数: {len(rows)}, 数据行: {valid_row_count}, 过滤后有效: {len(all_prices)}")
 
     except Exception as e:
         print(f"[{name}] 爬取异常: {e}")
