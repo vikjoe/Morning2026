@@ -62,24 +62,48 @@ class TestPriceMonitor(unittest.TestCase):
         self.assertEqual(new_count, 0)
         self.assertFalse(today_res[0]['is_new'])
 
+    def test_generate_html_report(self):
+        """测试 HTML 报表生成是否包含关键信息"""
+        today_data = [{'date_str': '2026-01-01', 'raw_name': 'TodayItem', 'spec': 'SpecA', 'price': '100', 'company': 'CorpA', 'is_new': True}]
+        yesterday_data = [{'date_str': '2025-12-31', 'raw_name': 'OldItem', 'spec': 'SpecB', 'price': '90', 'company': 'CorpB'}]
+        
+        html = main.generate_html_report(today_data, yesterday_data)
+        self.assertIn("TodayItem", html)
+        self.assertIn("100", html)
+        self.assertIn("(NEW)", html)
+        self.assertIn("OldItem", html)
+
     @patch('main.requests.post')
     def test_send_notification(self, mock_post):
-        """测试推送功能是否发起请求"""
+        """测试 PushPlus 推送功能"""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = '{"code": 200}'
         mock_post.return_value = mock_resp
         
-        today_data = [{'date_str': '2026-01-01', 'raw_name': 'TestName', 'spec': 'TestSpec', 'price': '8888', 'company': 'TestCorp', 'is_new': True}]
-        yesterday_data = []
-        
-        res = main.send_notification(today_data, yesterday_data)
+        test_html = "<html>Test Content</html>"
+        res = main.send_notification(test_html)
         
         self.assertTrue(res)
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
-        self.assertIn("8888", kwargs['json']['content'])
-        self.assertIn("NEW", kwargs['json']['content']) # 应该包含新增标记
+        self.assertEqual(kwargs['json']['content'], test_html)
+
+    @patch('main.smtplib.SMTP_SSL')
+    def test_send_email_notification(self, mock_smtp):
+        """测试邮件通知功能 (Mock SMTP)"""
+        main.EMAIL_SENDER = "sender@qq.com"
+        main.EMAIL_AUTH_CODE = "authcode"
+        main.EMAIL_RECEIVER = "receiver@qq.com"
+        
+        instance = mock_smtp.return_value.__enter__.return_value
+        
+        test_html = "<html>Email Content</html>"
+        res = main.send_email_notification(test_html)
+        
+        self.assertTrue(res)
+        instance.login.assert_called_with("sender@qq.com", "authcode")
+        instance.sendmail.assert_called()
 
 if __name__ == '__main__':
     unittest.main()

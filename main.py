@@ -9,12 +9,20 @@ import glob
 import json
 import hashlib
 import subprocess
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 
 # 默认设置
 CONFIG_DIR = "COMM-CFG"
 DATA_DIR = "data"
 RECORD_FILE = os.path.join(DATA_DIR, "processed_records.json")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
+
+# 邮件配置 (从环境变量读取)
+EMAIL_SENDER = os.environ.get("EMAIL_SENDER")
+EMAIL_AUTH_CODE = os.environ.get("EMAIL_AUTH_CODE")
+EMAIL_RECEIVER = os.environ.get("EMAIL_RECEIVER")
 
 def load_configs():
     """从 COMM-CFG 目录加载所有 yaml 配置文件"""
@@ -207,18 +215,12 @@ def organize_data(all_prices, sent_hashes):
     
     return today_data, yesterday_slice, new_items_count
 
-def send_notification(today_data, yesterday_data):
-    if not PUSHPLUS_TOKEN:
-        print("未找到 PUSHPLUS_TOKEN (环境变量)，无法推送。")
-        return False
-
+def generate_html_report(today_data, yesterday_data):
+    """生成统一的 HTML 报表内容"""
     tz = pytz.timezone('Asia/Shanghai')
     now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
     
-    title = f"📢 商品报价更新 ({now_str})"
-    
-    html = f"<h3>📅 报价更新 ({now_str})</h3>"
-    
+    html = f"<h3>📅 报价更新报告 ({now_str})</h3>"
     html += """
     <table border="1" style="border-collapse: collapse; width: 100%; font-size: 14px;">
         <tr style="background-color: #333; color: white;">
@@ -231,12 +233,11 @@ def send_notification(today_data, yesterday_data):
     
     # 1. 今日数据 (HighLight)
     for item in today_data:
-        # 如果是本次新增，给予最醒目的标记
         if item.get('is_new'):
             row_style = "background-color: #ffcdd2; font-weight: bold; border: 2px solid red;"
-            date_display = f"{item['date_str']} <span style='background:red;color:white;padding:2px;border-radius:4px;'>NEW</span>"
+            # 在邮件/PushPlus中 NEW 标记显示略有不同以保持兼容
+            date_display = f"{item['date_str']} (NEW)"
         else:
-            # 之前已发的今日数据，普通高亮
             row_style = "background-color: #fff9c4;"
             date_display = item['date_str']
 
@@ -261,27 +262,60 @@ def send_notification(today_data, yesterday_data):
         """
         
     html += "</table>"
-    html += "<p style='font-size:12px; color: gray;'>注: 红色框为最新发现的报价，黄色为今日已发过的报价，灰色为昨日参考。</p>"
+    html += "<p style='font-size:12px; color: gray;'>注: 红色标记为最新发现的报价，黄色为今日早前报价，灰色为昨日参考。</p>"
+    return html
+
+def send_notification(html_content):
+    """通过 PushPlus 发送微信通知"""
+    if not PUSHPLUS_TOKEN:
+        print("未找到 PUSHPLUS_TOKEN，跳过微信推送。")
+        return False
+
+    tz = pytz.timezone('Asia/Shanghai')
+    now_str = datetime.now(tz).strftime('%H:%M')
+    title = f"📢 报价更新提醒 ({now_str})"
     
-    # 发送
     url = "http://www.pushplus.plus/send"
     payload = {
         "token": PUSHPLUS_TOKEN,
         "title": title,
-        "content": html,
+        "content": html_content,
         "template": "html"
     }
     
     try:
-        resp = requests.post(url, json=payload)
-        print(f"推送响应: {resp.text}")
-        if resp.status_code == 200:
-            return True
+        resp = requests.post(url, json=payload, timeout=20)
+        print(f"微信推送响应: {resp.text}")
+        return resp.status_code == 200
     except Exception as e:
-        print(f"推送失败: {e}")
+        print(f"微信推送失败: {e}")
         return False
-    
-    return False
+
+def send_email_notification(html_content):
+    """通过 SMTP 发送 QQ 邮件通知"""
+    if not all([EMAIL_SENDER, EMAIL_AUTH_CODE, EMAIL_RECEIVER]):
+        print("邮件配置不全 (SENDER/AUTH_CODE/RECEIVER)，跳过邮件发送。")
+        return False
+
+    tz = pytz.timezone('Asia/Shanghai')
+    now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+    subject = f"商品报价更新服务 - {now_str}"
+
+    msg = MIMEText(html_content, 'html', 'utf-8')
+    msg['Subject'] = Header(subject, 'utf-8')
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = EMAIL_RECEIVER
+
+    try:
+        # QQ 邮箱使用 SSL 端口 465
+        with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_AUTH_CODE)
+            server.sendmail(EMAIL_SENDER, [EMAIL_RECEIVER], msg.as_string())
+        print("邮件通知发送成功。")
+        return True
+    except Exception as e:
+        print(f"邮件通知发送失败: {e}")
+        return False
 
 def main():
     tz = pytz.timezone('Asia/Shanghai')
@@ -314,11 +348,17 @@ def main():
     
     if new_count > 0:
         print("发现新报价，准备发送推送...")
-        success = send_notification(today_data, yesterday_data)
+        # 1. 生成统一报表
+        html_report = generate_html_report(today_data, yesterday_data)
         
-        if success:
-            # 发送成功后，更新记录
-            print("更新本地状态记录...")
+        # 2. 同时发送微信和邮件 (两个都发，不互相影响)
+        push_success = send_notification(html_report)
+        email_success = send_email_notification(html_report)
+        
+        # 只要有一种发送方式被触发（这里我们以微信推送成功或尝试过邮件为准）
+        # 或者直接认为只要发现了新数据并尝试过发送，就更新记录，防止重复轰炸
+        if push_success or email_success:
+            print("消息已通过至少一种渠道发出，正在更新本地状态记录...")
             for item in today_data:
                 if item.get('is_new'):
                     item_hash = get_item_hash(item)

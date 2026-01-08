@@ -30,6 +30,8 @@ jobs:
         
     - name: Run Morning Script
       env:
-        # This secret must be set in the GitHub repository settings
         PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+        EMAIL_AUTH_CODE: ${{ secrets.EMAIL_AUTH_CODE }}
+        EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
       run: python main.py
