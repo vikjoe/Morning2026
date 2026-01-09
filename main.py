@@ -52,17 +52,14 @@ def get_sinopec_factory_price():
         soup = BeautifulSoup(resp.text, 'html.parser')
         
         # 寻找包含 "中石化丁二烯出厂价格" 的标题
-        news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
+        # 遍历页面所有链接，寻找包含特定关键词的 detail 链接
         target_url = None
-        for item in news_items:
-            link = item.find('a')
-            if not link or not link.get('href'): continue
-            
-            text = item.get_text()
-            href = link.get('href')
+        for link in soup.find_all('a'):
+            href = link.get('href', '')
+            text = link.get_text()
             
             # 必须包含 detail 且包含日期关键词
-            if "detail-" in href and today_md in text and ("中石化" in text and "丁二烯" in text and "价格" in text):
+            if "detail-" in href and today_md in text and "中石化" in text and "丁二烯" in text:
                 target_url = href
                 if not target_url.startswith('http'):
                     if target_url.startswith('/'):
@@ -178,17 +175,14 @@ def get_natural_rubber_price():
         soup = BeautifulSoup(resp.text, 'html.parser')
         
         # 寻找包含 "天然橡胶商品报价动态" 的标题
-        news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
+        # 遍历所有链接
         target_url = None
-        for item in news_items:
-            link = item.find('a')
-            if not link or not link.get('href'): continue
-            
-            text = item.get_text()
-            href = link.get('href')
+        for link in soup.find_all('a'):
+            href = link.get('href', '')
+            text = link.get_text()
             
             # 必须包含 detail 且包含日期关键词 (天然橡胶商品报价动态)
-            if "detail-" in href and "天然橡胶" in text and "报价动态" in text and date_pattern.replace("-", "")[4:] in href:
+            if "detail-" in href and "天然橡胶" in text and "报价动态" in text and date_pattern in text:
                 target_url = href
                 if not target_url.startswith('http'):
                     if target_url.startswith('/'):
