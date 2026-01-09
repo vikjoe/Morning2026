@@ -552,7 +552,7 @@ def main():
     # --- 任务 1: 中石化丁二烯专场 ---
     sinopec_triggered = False
     if records.get("sinopec_done_date") != today_str:
-        if 9 <= now.hour <= 23: # 扩大测试窗口
+        if 9 <= now.hour <= 11: # 监测窗口 09:00 - 12:00
             print("正在监测中石化丁二烯报价...")
             sinopec_data = get_sinopec_factory_price()
             if sinopec_data:
@@ -574,7 +574,7 @@ def main():
     # --- 任务 2: 天然橡胶专场 ---
     nr_triggered = False
     if records.get("nr_done_date") != today_str:
-        if 9 <= now.hour <= 23: # 与中石化窗口一致
+        if 9 <= now.hour <= 11: # 与中石化窗口一致
             print("正在监测天然橡胶当日动态...")
             nr_data = get_natural_rubber_price()
             if nr_data:
