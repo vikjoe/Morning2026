@@ -11,6 +11,7 @@ import json
 import hashlib
 import subprocess
 import smtplib
+import re
 from email.mime.text import MIMEText
 from email.header import Header
 
@@ -54,18 +55,21 @@ def get_sinopec_factory_price():
         news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
         target_url = None
         for item in news_items:
+            link = item.find('a')
+            if not link or not link.get('href'): continue
+            
             text = item.get_text()
-            if today_md in text and "中石化丁2烯出厂价" in text.replace("二", "2") or \
-               (today_md in text and "中石化" in text and "丁二烯" in text and "价格" in text):
-                link = item.find('a')
-                if link and link.get('href'):
-                    target_url = link.get('href')
-                    if not target_url.startswith('http'):
-                        if target_url.startswith('/'):
-                            target_url = "https://www.100ppi.com" + target_url
-                        else:
-                            target_url = "https://www.100ppi.com/" + target_url
-                    break
+            href = link.get('href')
+            
+            # 必须包含 detail 且包含日期关键词
+            if "detail-" in href and today_md in text and ("中石化" in text and "丁二烯" in text and "价格" in text):
+                target_url = href
+                if not target_url.startswith('http'):
+                    if target_url.startswith('/'):
+                        target_url = "https://www.100ppi.com" + target_url
+                    else:
+                        target_url = "https://www.100ppi.com/" + target_url
+                break
         
         if not target_url:
             print(f"今日 ({today_md}) 尚未发布中石化丁二烯出厂价资讯。")
@@ -87,7 +91,6 @@ def get_sinopec_factory_price():
             if p in content:
                 # 寻找厂家后面的 4 位数字
                 idx = content.find(p)
-                import re
                 match = re.search(r'(\d{4})', content[idx:idx+50])
                 if match:
                     prices[p] = int(match.group(1))
@@ -178,17 +181,21 @@ def get_natural_rubber_price():
         news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
         target_url = None
         for item in news_items:
+            link = item.find('a')
+            if not link or not link.get('href'): continue
+            
             text = item.get_text()
-            if "天然橡胶商品报价动态" in text and date_pattern in text:
-                link = item.find('a')
-                if link and link.get('href'):
-                    target_url = link.get('href')
-                    if not target_url.startswith('http'):
-                        if target_url.startswith('/'):
-                            target_url = "https://www.100ppi.com" + target_url
-                        else:
-                            target_url = "https://www.100ppi.com/" + target_url
-                    break
+            href = link.get('href')
+            
+            # 必须包含 detail 且包含日期关键词 (天然橡胶商品报价动态)
+            if "detail-" in href and "天然橡胶" in text and "报价动态" in text and date_pattern.replace("-", "")[4:] in href:
+                target_url = href
+                if not target_url.startswith('http'):
+                    if target_url.startswith('/'):
+                        target_url = "https://www.100ppi.com" + target_url
+                    else:
+                        target_url = "https://www.100ppi.com/" + target_url
+                break
         
         if not target_url:
             print(f"今日 ({date_pattern}) 尚未发布天然橡胶报价动态。")
@@ -214,7 +221,6 @@ def get_natural_rubber_price():
                 brand = cols[1].get_text(strip=True)
                 price_str = cols[3].get_text(strip=True)
                 # 提取数字
-                import re
                 match = re.search(r'(\d+)', price_str)
                 if match:
                     key = f"{trader}({brand})"
