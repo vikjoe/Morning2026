@@ -27,6 +27,7 @@ CONFIG_DIR = "COMM-CFG"
 DATA_DIR = "data"
 RECORD_FILE = os.path.join(DATA_DIR, "processed_records.json")
 SINOPEC_HISTORY_FILE = os.path.join(DATA_DIR, "sinopec_butadiene_history.json")
+NR_HISTORY_FILE = os.path.join(DATA_DIR, "natural_rubber_history.json")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 # 邮件配置 (从环境变量读取)
@@ -158,6 +159,131 @@ def generate_sinopec_html(today_sinopec, history):
     
     return html
 
+def get_natural_rubber_price():
+    """获取天然橡胶当日报价动态 (从资讯列表页抓取)"""
+    list_url = "https://www.100ppi.com/news/list-15--56-1.html"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    
+    tz = pytz.timezone('Asia/Shanghai')
+    today = datetime.now(tz)
+    date_pattern = f"{today.year}-{today.month:02d}-{today.day:02d}"
+    today_title_str = f"（{date_pattern}）"
+    
+    try:
+        resp = requests.get(list_url, headers=headers, timeout=15)
+        resp.encoding = 'utf-8'
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        # 寻找包含 "天然橡胶商品报价动态" 的标题
+        news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
+        target_url = None
+        for item in news_items:
+            text = item.get_text()
+            if "天然橡胶商品报价动态" in text and date_pattern in text:
+                link = item.find('a')
+                if link and link.get('href'):
+                    target_url = link.get('href')
+                    if not target_url.startswith('http'):
+                        if target_url.startswith('/'):
+                            target_url = "https://www.100ppi.com" + target_url
+                        else:
+                            target_url = "https://www.100ppi.com/" + target_url
+                    break
+        
+        if not target_url:
+            print(f"今日 ({date_pattern}) 尚未发布天然橡胶报价动态。")
+            return None
+
+        print(f"发现今日天然橡胶资讯: {target_url}，正在解析详情...")
+        detail_resp = requests.get(target_url, headers=headers, timeout=15)
+        detail_resp.encoding = 'utf-8'
+        detail_soup = BeautifulSoup(detail_resp.text, 'html.parser')
+        
+        # 抓取表格数据
+        table = detail_soup.find('table')
+        if not table:
+            print("未能在详情页找到报价表格。")
+            return None
+            
+        prices = {}
+        rows = table.find_all('tr')
+        for row in rows[1:]: # 跳过表头
+            cols = row.find_all('td')
+            if len(cols) >= 4:
+                trader = cols[0].get_text(strip=True)
+                brand = cols[1].get_text(strip=True)
+                price_str = cols[3].get_text(strip=True)
+                # 提取数字
+                import re
+                match = re.search(r'(\d+)', price_str)
+                if match:
+                    key = f"{trader}({brand})"
+                    prices[key] = int(match.group(1))
+        
+        if prices:
+            return {
+                "date": today.strftime('%Y-%m-%d'),
+                "prices": prices,
+                "url": target_url
+            }
+    except Exception as e:
+        print(f"抓取天然橡胶报价失败: {e}")
+    return None
+
+def generate_nr_html(today_nr, history):
+    """为天然橡胶价格生成专属 HTML 报告"""
+    tz = pytz.timezone('Asia/Shanghai')
+    now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+    
+    html = f"<h2>🌳 天然橡胶商品报价动态报告</h2>"
+    html += f"<p><b>更新时间:</b> {now_str}</p>"
+    
+    prices = today_nr['prices']
+    avg_price = sum(prices.values()) / len(prices)
+    
+    html += "<h3>📍 今日交易商报价详情</h3>"
+    html += '<table border="1" style="border-collapse: collapse; width: 100%; text-align: center; font-size: 13px;">'
+    html += '<tr style="background:#eee;"><th>交易商(品牌)</th><th>报价 (元/吨)</th><th>对比</th></tr>'
+    
+    for label, price in prices.items():
+        style = ""
+        diff_text = "持平"
+        diff = price - avg_price
+        if abs(diff) > 10:
+            style = 'style="background-color: #fff9c4;"'
+            if diff > 0: 
+                diff_text = f'<span style="color:red;">偏高 {int(diff)}</span>'
+                style = 'style="background-color: #ffcdd2; font-weight:bold;"'
+            else: 
+                diff_text = f'<span style="color:green;">偏低 {int(abs(diff))}</span>'
+
+        html += f'<tr {style}><td>{label}</td><td>{price}</td><td>{diff_text}</td></tr>'
+    html += "</table>"
+    
+    # 最近趋势
+    html += "<h3>📈 最近 7 天均价走势</h3>"
+    html += '<table border="1" style="border-collapse: collapse; width: 100%; text-align: center;">'
+    html += '<tr style="background:#333; color:white;"><th>日期</th><th>均价</th><th>变动</th></tr>'
+    
+    all_dates = history + [{"date": today_nr['date'], "price": int(avg_price)}]
+    recent_7 = all_dates[-7:]
+    recent_7.reverse()
+    
+    for i, entry in enumerate(recent_7):
+        price = entry['price']
+        change = "持平"
+        if i < len(recent_7) - 1:
+            prev_price = recent_7[i+1]['price']
+            diff = price - prev_price
+            if diff > 0: change = f'<span style="color:red;">+{int(diff)}</span>'
+            elif diff < 0: change = f'<span style="color:green;">-{int(abs(diff))}</span>'
+            
+        html += f"<tr><td>{entry['date']}</td><td>{price}</td><td>{change}</td></tr>"
+    html += "</table>"
+    html += f'<p style="font-size:12px;"><a href="{today_nr["url"]}">查看原资讯页面</a></p>'
+    
+    return html
+
 def load_configs():
     """从 COMM-CFG 目录加载所有 yaml 配置文件"""
     configs = []
@@ -186,14 +312,15 @@ def get_item_hash(item):
 def load_processed_records():
     """加载已处理记录"""
     if not os.path.exists(RECORD_FILE):
-        return {"date": "", "hashes": [], "sinopec_done_date": ""}
+        return {"date": "", "hashes": [], "sinopec_done_date": "", "nr_done_date": ""}
     try:
         with open(RECORD_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
             if "sinopec_done_date" not in data: data["sinopec_done_date"] = ""
+            if "nr_done_date" not in data: data["nr_done_date"] = ""
             return data
     except Exception:
-        return {"date": "", "hashes": [], "sinopec_done_date": ""}
+        return {"date": "", "hashes": [], "sinopec_done_date": "", "nr_done_date": ""}
 
 def save_processed_records(records):
     """保存记录到文件"""
@@ -404,41 +531,63 @@ def main():
     
     records = load_processed_records()
     if records["date"] != today_str:
-        records.update({"date": today_str, "hashes": [], "sinopec_done_date": records.get("sinopec_done_date", "")})
+        records.update({
+            "date": today_str, 
+            "hashes": [], 
+            "sinopec_done_date": records.get("sinopec_done_date", ""),
+            "nr_done_date": records.get("nr_done_date", "")
+        })
     
-    # 任务 1: 中石化专场 (9:00 - 10:30)
+    # --- 任务 1: 中石化丁二烯专场 ---
     sinopec_triggered = False
     if records.get("sinopec_done_date") != today_str:
-        # 如果在 9:00 - 10:30 之间，或者虽然过了 10:30 但今天还没成功抓到过
-        if 9 <= now.hour <= 10: # 包含 10:00-10:59
-            print("进入中石化报价监测窗口 (09:00-11:00)...")
+        if 9 <= now.hour <= 17: # 扩大测试窗口
+            print("正在监测中石化丁二烯报价...")
             sinopec_data = get_sinopec_factory_price()
             if sinopec_data:
-                # 读取历史记录并更新
                 history = []
                 if os.path.exists(SINOPEC_HISTORY_FILE):
                     with open(SINOPEC_HISTORY_FILE, 'r', encoding='utf-8') as f:
                         history = json.load(f)
-                
-                # 生成报告
                 html = generate_sinopec_html(sinopec_data, history)
                 if send_notification(html) or send_email_notification(html):
-                    print("中石化当日报价已成功推送并归档。")
-                    # 更新历史并保存
                     avg_p = sum(sinopec_data['prices'].values()) / len(sinopec_data['prices'])
                     history.append({"date": today_str, "price": int(avg_p), "is_sinopec": True})
-                    # 保持历史文件不要太大，可以只留最近一个月或三个月，这里暂时不限制
                     with open(SINOPEC_HISTORY_FILE, 'w', encoding='utf-8') as f:
                         json.dump(history, f, indent=2, ensure_ascii=False)
-                    
                     records["sinopec_done_date"] = today_str
                     sinopec_triggered = True
                     save_processed_records(records)
                     git_commit_changes()
 
-    # 任务 2: 散户轮询 (如果中石化没搞定，或者还在窗口期但没抓到)
+    # --- 任务 2: 天然橡胶专场 ---
+    nr_triggered = False
+    if records.get("nr_done_date") != today_str:
+        if 9 <= now.hour <= 17: # 与中石化窗口一致
+            print("正在监测天然橡胶当日动态...")
+            nr_data = get_natural_rubber_price()
+            if nr_data:
+                history = []
+                if os.path.exists(NR_HISTORY_FILE):
+                    with open(NR_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                        history = json.load(f)
+                html = generate_nr_html(nr_data, history)
+                # 使用专门的标题推送
+                if send_notification(html) or send_email_notification(html):
+                    print("今日天然橡胶报价已成功推送并归档。")
+                    avg_p = sum(nr_data['prices'].values()) / len(nr_data['prices'])
+                    history.append({"date": today_str, "price": int(avg_p), "note": "Average"})
+                    with open(NR_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(history, f, indent=2, ensure_ascii=False)
+                    records["nr_done_date"] = today_str
+                    nr_triggered = True
+                    save_processed_records(records)
+                    git_commit_changes()
+
+    # --- 任务 3: 市场散户轮询 ---
+    # 如果中石化还没出，执行散户轮询
     if records.get("sinopec_done_date") != today_str:
-        print("中石化报价尚未获取，执行常规散户报价轮询...")
+        print("执行常规散户丁二烯报价轮询...")
         configs = load_configs()
         sent_hashes = set(records["hashes"])
         all_items = []

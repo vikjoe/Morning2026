@@ -1,0 +1,27 @@
+[
+    {
+        "date": "2026-01-05",
+        "price": 15550,
+        "note": "Average"
+    },
+    {
+        "date": "2026-01-06",
+        "price": 15700,
+        "note": "Average"
+    },
+    {
+        "date": "2026-01-07",
+        "price": 15870,
+        "note": "Average"
+    },
+    {
+        "date": "2026-01-08",
+        "price": 15875,
+        "note": "Average"
+    },
+    {
+        "date": "2026-01-09",
+        "price": 15700,
+        "note": "Average"
+    }
+]
