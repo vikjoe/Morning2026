@@ -60,7 +60,10 @@ def get_sinopec_factory_price():
                 if link and link.get('href'):
                     target_url = link.get('href')
                     if not target_url.startswith('http'):
-                        target_url = "https://www.100ppi.com" + target_url
+                        if target_url.startswith('/'):
+                            target_url = "https://www.100ppi.com" + target_url
+                        else:
+                            target_url = "https://www.100ppi.com/" + target_url
                     break
         
         if not target_url:
@@ -407,7 +410,7 @@ def main():
     sinopec_triggered = False
     if records.get("sinopec_done_date") != today_str:
         # 如果在 9:00 - 10:30 之间，或者虽然过了 10:30 但今天还没成功抓到过
-        if 9 <= now.hour <= 16: # 包含 16:00-16:59
+        if 9 <= now.hour <= 10: # 包含 10:00-10:59
             print("进入中石化报价监测窗口 (09:00-11:00)...")
             sinopec_data = get_sinopec_factory_price()
             if sinopec_data:
