@@ -26,12 +26,134 @@ if sys.stdout.encoding != 'utf-8':
 CONFIG_DIR = "COMM-CFG"
 DATA_DIR = "data"
 RECORD_FILE = os.path.join(DATA_DIR, "processed_records.json")
+SINOPEC_HISTORY_FILE = os.path.join(DATA_DIR, "sinopec_butadiene_history.json")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 # 邮件配置 (从环境变量读取)
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER")
 EMAIL_AUTH_CODE = os.environ.get("EMAIL_AUTH_CODE")
 EMAIL_RECEIVER = os.environ.get("EMAIL_RECEIVER")
+
+def get_sinopec_factory_price():
+    """获取中石化丁二烯当日出厂价 (从资讯列表页抓取)"""
+    list_url = "https://www.100ppi.com/news/list-14--369-1.html"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    
+    tz = pytz.timezone('Asia/Shanghai')
+    today = datetime.now(tz)
+    # 格式化为 "1月9日" 而不是 "01月09日"，以匹配网页标题
+    today_md = f"{today.month}月{today.day}日"
+    
+    try:
+        resp = requests.get(list_url, headers=headers, timeout=15)
+        resp.encoding = 'utf-8'
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        # 寻找包含 "中石化丁二烯出厂价格" 的标题
+        news_items = soup.find_all('div', class_='list-item') or soup.find_all('li')
+        target_url = None
+        for item in news_items:
+            text = item.get_text()
+            if today_md in text and "中石化丁2烯出厂价" in text.replace("二", "2") or \
+               (today_md in text and "中石化" in text and "丁二烯" in text and "价格" in text):
+                link = item.find('a')
+                if link and link.get('href'):
+                    target_url = link.get('href')
+                    if not target_url.startswith('http'):
+                        target_url = "https://www.100ppi.com" + target_url
+                    break
+        
+        if not target_url:
+            print(f"今日 ({today_md}) 尚未发布中石化丁二烯出厂价资讯。")
+            return None
+
+        # 进入详情页抓取具体厂家价格
+        print(f"发现今日中石化资讯: {target_url}，正在解析详情...")
+        detail_resp = requests.get(target_url, headers=headers, timeout=15)
+        detail_resp.encoding = 'utf-8'
+        detail_soup = BeautifulSoup(detail_resp.text, 'html.parser')
+        content = detail_soup.get_text()
+        
+        # 简单解析逻辑：寻找数字
+        # 通常格式: "上海石化执行9100元/吨", "扬子石化执行9100元/吨"
+        # 预定义一些常见厂家
+        plants = ["上海石化", "扬子石化", "镇海炼化", "广州石化", "茂名石化", "中韩石化", "中科炼化"]
+        prices = {}
+        for p in plants:
+            if p in content:
+                # 寻找厂家后面的 4 位数字
+                idx = content.find(p)
+                import re
+                match = re.search(r'(\d{4})', content[idx:idx+50])
+                if match:
+                    prices[p] = int(match.group(1))
+        
+        if not prices:
+            # 如果没抓到具体的，尝试抓通稿中的统一价格
+            match = re.search(r'执行(\d{4})元', content)
+            if match:
+                prices["中石化(统一)"] = int(match.group(1))
+        
+        if prices:
+            return {
+                "date": today.strftime('%Y-%m-%d'),
+                "prices": prices,
+                "url": target_url
+            }
+    except Exception as e:
+        print(f"抓取中石化出厂价失败: {e}")
+    return None
+
+def generate_sinopec_html(today_sinopec, history):
+    """为中石化价格生成专门的 HTML 报告"""
+    tz = pytz.timezone('Asia/Shanghai')
+    now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+    
+    html = f"<h2>🚀 中石化丁二烯出厂价更新报告</h2>"
+    html += f"<p><b>更新时间:</b> {now_str}</p>"
+    
+    # 1. 当日详情与对比
+    prices = today_sinopec['prices']
+    avg_price = sum(prices.values()) / len(prices)
+    
+    html += "<h3>📍 今日厂家报价</h3>"
+    html += '<table border="1" style="border-collapse: collapse; width: 100%; text-align: center;">'
+    html += '<tr style="background:#eee;"><th>厂家</th><th>价格 (元/吨)</th><th>状态</th></tr>'
+    
+    for plant, price in prices.items():
+        style = ""
+        status = "正常"
+        if price != avg_price:
+            style = 'style="background-color: #ffcdd2; color: red; font-weight: bold;"'
+            status = "⚠️ 价格异常"
+        
+        html += f'<tr {style}><td>{plant}</td><td>{price}</td><td>{status}</td></tr>'
+    html += "</table>"
+    
+    # 2. 最近7天趋势
+    html += "<h3>📈 最近 7 天价格趋势</h3>"
+    html += '<table border="1" style="border-collapse: collapse; width: 100%; text-align: center;">'
+    html += '<tr style="background:#333; color:white;"><th>日期</th><th>报价</th><th>变动</th></tr>'
+    
+    # 包含今天及历史前6天
+    all_dates = history + [{"date": today_sinopec['date'], "price": int(avg_price)}]
+    recent_7 = all_dates[-7:]
+    recent_7.reverse() # 最新的在前
+    
+    for i, entry in enumerate(recent_7):
+        price = entry['price']
+        change = "持平"
+        if i < len(recent_7) - 1:
+            prev_price = recent_7[i+1]['price']
+            diff = price - prev_price
+            if diff > 0: change = f'<span style="color:red;">+{diff}</span>'
+            elif diff < 0: change = f'<span style="color:green;">{diff}</span>'
+            
+        html += f"<tr><td>{entry['date']}</td><td>{price}</td><td>{change}</td></tr>"
+    html += "</table>"
+    html += f'<p style="font-size:12px;"><a href="{today_sinopec["url"]}">查看原资讯页面</a></p>'
+    
+    return html
 
 def load_configs():
     """从 COMM-CFG 目录加载所有 yaml 配置文件"""
@@ -61,12 +183,14 @@ def get_item_hash(item):
 def load_processed_records():
     """加载已处理记录"""
     if not os.path.exists(RECORD_FILE):
-        return {"date": "", "hashes": []}
+        return {"date": "", "hashes": [], "sinopec_done_date": ""}
     try:
         with open(RECORD_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            if "sinopec_done_date" not in data: data["sinopec_done_date"] = ""
+            return data
     except Exception:
-        return {"date": "", "hashes": []}
+        return {"date": "", "hashes": [], "sinopec_done_date": ""}
 
 def save_processed_records(records):
     """保存记录到文件"""
@@ -84,10 +208,8 @@ def git_commit_changes():
         subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         
         # Add & Commit & Push
-        subprocess.run(["git", "add", RECORD_FILE], check=True)
-        # 只有在有变动时 commit 才会成功，否则会由 git 返回 exit 1 (或只是 no output)
-        # 我们忽略 commit 的错误（比如无变更时）
-        subprocess.run(["git", "commit", "-m", "Update processed records [skip ci]"], check=False)
+        subprocess.run(["git", "add", DATA_DIR], check=True) # 提交整个 data 目录（包含历史记录）
+        subprocess.run(["git", "commit", "-m", "Auto-update prices and history [skip ci]"], check=False)
         subprocess.run(["git", "push"], check=True)
         print("已成功提交状态记录更新。")
     except Exception as e:
@@ -136,7 +258,7 @@ def get_price_data(config):
                     break
 
         if not target_table:
-            print(f"[{name}] 未找到有效的数据表格。页面长度: {len(response.text)}")
+            print(f"[{name}] 未找到有效的数据表格。")
             return []
 
         rows = target_table.find_all('tr')
@@ -184,7 +306,7 @@ def get_price_data(config):
             except ValueError:
                 continue
         
-        print(f"[{name}] 扫描完毕。总行数: {len(rows)}, 数据行: {valid_row_count}, 过滤后有效: {len(all_prices)}")
+        print(f"[{name}] 扫描完毕。过滤后有效: {len(all_prices)}")
 
     except Exception as e:
         print(f"[{name}] 爬取异常: {e}")
@@ -192,11 +314,7 @@ def get_price_data(config):
     return all_prices
 
 def organize_data(all_prices, sent_hashes):
-    """
-    整理数据:
-    1. 分离 '今日'(Today) 和 '昨日'(Yesterday)。
-    2. 标记 '今日' 数据中的 '新增' (New) 数据。
-    """
+    """整理数据"""
     tz = pytz.timezone('Asia/Shanghai')
     today = datetime.now(tz).date()
     yesterday = today - timedelta(days=1)
@@ -210,18 +328,14 @@ def organize_data(all_prices, sent_hashes):
         item['is_new'] = False
         
         if item['date'] == today:
-            # Check if this hash has been sent
             if item_hash not in sent_hashes:
                 item['is_new'] = True
                 new_items_count += 1
             today_data.append(item)
-            
         elif item['date'] == yesterday:
             yesterday_data.append(item)
     
-    # 昨日数据只取最新的3条
     yesterday_slice = yesterday_data[:3]
-    
     return today_data, yesterday_slice, new_items_count
 
 def generate_html_report(today_data, yesterday_data):
@@ -229,7 +343,7 @@ def generate_html_report(today_data, yesterday_data):
     tz = pytz.timezone('Asia/Shanghai')
     now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
     
-    html = f"<h3>📅 报价更新报告 ({now_str})</h3>"
+    html = f"<h3>📅 市场散户报价更新 ({now_str})</h3>"
     html += """
     <table border="1" style="border-collapse: collapse; width: 100%; font-size: 14px;">
         <tr style="background-color: #333; color: white;">
@@ -239,157 +353,105 @@ def generate_html_report(today_data, yesterday_data):
             <th>商家</th>
         </tr>
     """
-    
-    # 1. 今日数据 (HighLight)
     for item in today_data:
-        if item.get('is_new'):
-            row_style = "background-color: #ffcdd2; font-weight: bold; border: 2px solid red;"
-            # 在邮件/PushPlus中 NEW 标记显示略有不同以保持兼容
-            date_display = f"{item['date_str']} (NEW)"
-        else:
-            row_style = "background-color: #fff9c4;"
-            date_display = item['date_str']
-
-        html += f"""
-        <tr style="{row_style}">
-            <td style="color: #d32f2f;">{date_display}</td>
-            <td>{item['raw_name']}<br><span style="font-size:12px;color:gray;">{item['spec']}</span></td>
-            <td style="color: red; font-size: 16px;">{item['price']}</td>
-            <td>{item['company']}</td>
-        </tr>
-        """
+        row_style = "background-color: #ffcdd2; font-weight: bold; border: 2px solid red;" if item.get('is_new') else "background-color: #fff9c4;"
+        date_display = f"{item['date_str']} (NEW)" if item.get('is_new') else item['date_str']
+        html += f'<tr style="{row_style}"><td style="color: #d32f2f;">{date_display}</td><td>{item["raw_name"]}<br><span style="font-size:12px;color:gray;">{item["spec"]}</span></td><td style="color: red; font-size: 16px;">{item["price"]}</td><td>{item["company"]}</td></tr>'
         
-    # 2. 昨日数据 (Greyed out)
     for item in yesterday_data:
-        html += f"""
-        <tr style="background-color: #f5f5f5; color: #666;">
-            <td>{item['date_str']}</td>
-            <td>{item['raw_name']}<br><span style="font-size:12px;color:gray;">{item['spec']}</span></td>
-            <td>{item['price']}</td>
-            <td>{item['company']}</td>
-        </tr>
-        """
+        html += f'<tr style="background-color: #f5f5f5; color: #666;"><td>{item["date_str"]}</td><td>{item["raw_name"]}<br><span style="font-size:12px;color:gray;">{item["spec"]}</span></td><td>{item["price"]}</td><td>{item["company"]}</td></tr>'
         
-    html += "</table>"
-    html += "<p style='font-size:12px; color: gray;'>注: 红色标记为最新发现的报价，黄色为今日早前报价，灰色为昨日参考。</p>"
+    html += "</table><p style='font-size:12px; color: gray;'>注: 红色为最新，黄色为今日旧闻，灰色为昨日参考。</p>"
     return html
 
 def send_notification(html_content):
     """通过 PushPlus 发送微信通知"""
-    if not PUSHPLUS_TOKEN:
-        print("未找到 PUSHPLUS_TOKEN，跳过微信推送。")
-        return False
-
+    if not PUSHPLUS_TOKEN: return False
     tz = pytz.timezone('Asia/Shanghai')
-    now_str = datetime.now(tz).strftime('%H:%M')
-    title = f"📢 报价更新提醒 ({now_str})"
-    
-    url = "http://www.pushplus.plus/send"
-    payload = {
-        "token": PUSHPLUS_TOKEN,
-        "title": title,
-        "content": html_content,
-        "template": "html"
-    }
-    
+    title = f"📢 丁二烯价格更新 ({datetime.now(tz).strftime('%H:%M')})"
     try:
-        resp = requests.post(url, json=payload, timeout=20)
-        print(f"微信推送响应: {resp.text}")
+        resp = requests.post("http://www.pushplus.plus/send", json={"token": PUSHPLUS_TOKEN, "title": title, "content": html_content, "template": "html"}, timeout=20)
         return resp.status_code == 200
-    except Exception as e:
-        print(f"微信推送失败: {e}")
-        return False
+    except: return False
 
 def send_email_notification(html_content):
     """通过 SMTP 发送 QQ 邮件通知"""
-    if not all([EMAIL_SENDER, EMAIL_AUTH_CODE, EMAIL_RECEIVER]):
-        print("邮件配置不全 (SENDER/AUTH_CODE/RECEIVER)，跳过邮件发送。")
-        return False
-
+    if not all([EMAIL_SENDER, EMAIL_AUTH_CODE, EMAIL_RECEIVER]): return False
     tz = pytz.timezone('Asia/Shanghai')
-    now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-    subject = f"商品报价更新服务 - {now_str}"
-
     msg = MIMEText(html_content, 'html', 'utf-8')
-    msg['Subject'] = Header(subject, 'utf-8')
+    msg['Subject'] = Header(f"丁二烯报价更新服务 - {datetime.now(tz).strftime('%Y-%m-%d %H:%M')}", 'utf-8')
     msg['From'] = EMAIL_SENDER
     msg['To'] = EMAIL_RECEIVER
-
-    server = None
     try:
-        # QQ 邮箱使用 SSL 端口 465
         server = smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=15)
         server.login(EMAIL_SENDER, EMAIL_AUTH_CODE)
         server.sendmail(EMAIL_SENDER, [EMAIL_RECEIVER], msg.as_string())
-        
-        print("邮件正文已成功送达服务器。")
-        
-        # 尝试优雅退出，如果失败（常见于 QQ 邮箱），也认为成功
-        try:
-            server.quit()
-        except:
-            pass
-            
+        try: server.quit()
+        except: pass
         return True
     except Exception as e:
-        # 即使报错，如果错误提示是 EOF 相关的 (-1)，通常邮件其实已经发出去了
-        if "(-1," in str(e):
-            print(f"邮件已发出，但断开连接时遇到小波动 (EOF)，视为成功。")
-            return True
-        print(f"邮件通知发送失败: {e}")
+        if "(-1," in str(e): return True
         return False
 
 def main():
     tz = pytz.timezone('Asia/Shanghai')
     now = datetime.now(tz)
-    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 脚本启动，准备执行任务...")
+    today_str = now.strftime('%Y-%m-%d')
+    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 脚本启动...")
     
-    configs = load_configs()
     records = load_processed_records()
-    
-    # 检查是否跨天，如果是新的一天，重置记录
-    tz = pytz.timezone('Asia/Shanghai')
-    today_str = datetime.now(tz).strftime('%Y-%m-%d')
-    
     if records["date"] != today_str:
-        print(f"检测到新的一天 ({today_str})，重置发送记录。")
-        records["date"] = today_str
-        records["hashes"] = []
+        records.update({"date": today_str, "hashes": [], "sinopec_done_date": records.get("sinopec_done_date", "")})
     
-    sent_hashes = set(records["hashes"]) # 使用集合加速查找
-    
-    all_fetched_items = []
-    for config in configs:
-        items = get_price_data(config)
-        all_fetched_items.extend(items)
-    
-    # 整理数据，计算哪些是新的
-    today_data, yesterday_data, new_count = organize_data(all_fetched_items, sent_hashes)
-    
-    print(f"今日数据: {len(today_data)} 条, 其中新增: {new_count} 条")
-    
-    if new_count > 0:
-        print("发现新报价，准备发送推送...")
-        # 1. 生成统一报表
-        html_report = generate_html_report(today_data, yesterday_data)
+    # 任务 1: 中石化专场 (9:00 - 10:30)
+    sinopec_triggered = False
+    if records.get("sinopec_done_date") != today_str:
+        # 如果在 9:00 - 10:30 之间，或者虽然过了 10:30 但今天还没成功抓到过
+        if 9 <= now.hour <= 10: # 包含 10:00-10:59
+            print("进入中石化报价监测窗口 (09:00-11:00)...")
+            sinopec_data = get_sinopec_factory_price()
+            if sinopec_data:
+                # 读取历史记录并更新
+                history = []
+                if os.path.exists(SINOPEC_HISTORY_FILE):
+                    with open(SINOPEC_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                        history = json.load(f)
+                
+                # 生成报告
+                html = generate_sinopec_html(sinopec_data, history)
+                if send_notification(html) or send_email_notification(html):
+                    print("中石化当日报价已成功推送并归档。")
+                    # 更新历史并保存
+                    avg_p = sum(sinopec_data['prices'].values()) / len(sinopec_data['prices'])
+                    history.append({"date": today_str, "price": int(avg_p), "is_sinopec": True})
+                    # 保持历史文件不要太大，可以只留最近一个月或三个月，这里暂时不限制
+                    with open(SINOPEC_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(history, f, indent=2, ensure_ascii=False)
+                    
+                    records["sinopec_done_date"] = today_str
+                    sinopec_triggered = True
+                    save_processed_records(records)
+                    git_commit_changes()
+
+    # 任务 2: 散户轮询 (如果中石化没搞定，或者还在窗口期但没抓到)
+    if records.get("sinopec_done_date") != today_str:
+        print("中石化报价尚未获取，执行常规散户报价轮询...")
+        configs = load_configs()
+        sent_hashes = set(records["hashes"])
+        all_items = []
+        for cfg in configs: all_items.extend(get_price_data(cfg))
         
-        # 2. 同时发送微信和邮件 (两个都发，不互相影响)
-        push_success = send_notification(html_report)
-        email_success = send_email_notification(html_report)
-        
-        # 只要有一种发送方式被触发（这里我们以微信推送成功或尝试过邮件为准）
-        # 或者直接认为只要发现了新数据并尝试过发送，就更新记录，防止重复轰炸
-        if push_success or email_success:
-            print("消息已通过至少一种渠道发出，正在更新本地状态记录...")
-            for item in today_data:
-                if item.get('is_new'):
-                    item_hash = get_item_hash(item)
-                    records["hashes"].append(item_hash)
-            
-            save_processed_records(records)
-            git_commit_changes()
+        today_data, yesterday_data, new_count = organize_data(all_items, sent_hashes)
+        if new_count > 0:
+            html = generate_html_report(today_data, yesterday_data)
+            if send_notification(html) or send_email_notification(html):
+                for item in today_data:
+                    if item.get('is_new'): records["hashes"].append(get_item_hash(item))
+                save_processed_records(records)
+                git_commit_changes()
     else:
-        print("没有发现新的有效报价，本轮不发送推送。")
+        if not sinopec_triggered:
+            print("今日中石化报价已完成，散户常规轮询已跳过。")
 
 if __name__ == "__main__":
     main()
