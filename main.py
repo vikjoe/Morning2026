@@ -200,32 +200,47 @@ def get_natural_rubber_price():
         detail_resp.encoding = 'utf-8'
         detail_soup = BeautifulSoup(detail_resp.text, 'html.parser')
         
-        # 抓取表格数据
-        table = detail_soup.find('table')
-        if not table:
-            print("未能在详情页找到报价表格。")
-            return None
-            
+        # 抓取数据 (可能是 table 也可能是 ul.pn_text)
         prices = {}
-        rows = table.find_all('tr')
-        for row in rows[1:]: # 跳过表头
-            cols = row.find_all('td')
-            if len(cols) >= 4:
-                trader = cols[0].get_text(strip=True)
-                brand = cols[1].get_text(strip=True)
-                price_str = cols[3].get_text(strip=True)
-                # 提取数字
-                match = re.search(r'(\d+)', price_str)
-                if match:
-                    key = f"{trader}({brand})"
-                    prices[key] = int(match.group(1))
         
-        if prices:
-            return {
-                "date": today.strftime('%Y-%m-%d'),
-                "prices": prices,
-                "url": target_url
-            }
+        # 尝试结构化的 ul 列表 (这是生意社常用的展示方式)
+        ul_data = detail_soup.find('ul', class_='pn_text')
+        if ul_data:
+            items = ul_data.find_all('li', class_='pn_data')
+            for li in items:
+                spans = li.find_all('span')
+                if len(spans) >= 4:
+                    trader = spans[0].get_text(strip=True)
+                    brand = spans[1].get_text(strip=True)
+                    price_str = spans[3].get_text(strip=True)
+                    match = re.search(r'(\d+)', price_str)
+                    if match:
+                        prices[f"{trader}({brand})"] = int(match.group(1))
+        
+        # 如果没有 ul，尝试传统的 table
+        if not prices:
+            table = detail_soup.find('table')
+            if table:
+                rows = table.find_all('tr')
+                for row in rows[1:]:
+                    cols = row.find_all('td')
+                    if len(cols) >= 4:
+                        trader = cols[0].get_text(strip=True)
+                        brand = cols[1].get_text(strip=True)
+                        price_str = cols[3].get_text(strip=True)
+                        match = re.search(r'(\d+)', price_str)
+                        if match:
+                            prices[f"{trader}({brand})"] = int(match.group(1))
+        
+        if not prices:
+            print("未能在详情页解析到任何报价数据。")
+            return None
+        
+        return {
+            "date": today.strftime('%Y-%m-%d'),
+            "prices": prices,
+            "url": target_url
+        }
     except Exception as e:
         print(f"抓取天然橡胶报价失败: {e}")
     return None
