@@ -1,8 +1,143 @@
 [
   {
+    "date": "2025-12-01",
+    "price": 15067,
+    "note": "Market Average"
+  },
+  {
+    "date": "2025-12-02",
+    "price": 14900,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-03",
+    "price": 14975,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-04",
+    "price": 14933,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-05",
+    "price": 14883,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-08",
+    "price": 14843,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-09",
+    "price": 14858,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-10",
+    "price": 14800,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-11",
+    "price": 14942,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-12",
+    "price": 14917,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-15",
+    "price": 15175,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-16",
+    "price": 15158,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-17",
+    "price": 15150,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-18",
+    "price": 15200,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-19",
+    "price": 15100,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-22",
+    "price": 14983,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-23",
+    "price": 14950,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-24",
+    "price": 14983,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-25",
+    "price": 15100,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-26",
+    "price": 15358,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-29",
+    "price": 15458,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-30",
+    "price": 15408,
+    "note": "Average"
+  },
+  {
+    "date": "2025-12-31",
+    "price": 15417,
+    "note": "Pre-Holiday Close"
+  },
+  {
+    "date": "2026-01-01",
+    "price": 15338,
+    "note": "Holiday Adj"
+  },
+  {
+    "date": "2026-01-02",
+    "price": 15338,
+    "note": "Holiday"
+  },
+  {
+    "date": "2026-01-03",
+    "price": 15338,
+    "note": "Holiday"
+  },
+  {
+    "date": "2026-01-04",
+    "price": 15338,
+    "note": "Weekend"
+  },
+  {
     "date": "2026-01-05",
     "price": 15550,
-    "note": "Average"
+    "note": "Post-Holiday Rise"
   },
   {
     "date": "2026-01-06",
@@ -17,11 +152,6 @@
   {
     "date": "2026-01-08",
     "price": 15875,
-    "note": "Average"
-  },
-  {
-    "date": "2026-01-09",
-    "price": 15700,
     "note": "Average"
   },
   {

@@ -1,8 +1,50 @@
 [
   {
+    "date": "2025-12-01",
+    "price": 7400,
+    "note": "Initial",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-02",
+    "price": 7400,
+    "note": "持平",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-05",
+    "price": 7100,
+    "note": "-300",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-09",
+    "price": 7200,
+    "note": "+100",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-16",
+    "price": 7200,
+    "note": "持平",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-30",
+    "price": 8500,
+    "note": "+1300",
+    "is_sinopec": true
+  },
+  {
+    "date": "2025-12-31",
+    "price": 8500,
+    "note": "持平",
+    "is_sinopec": true
+  },
+  {
     "date": "2026-01-01",
     "price": 8300,
-    "note": "持平",
+    "note": "-200",
     "is_sinopec": true
   },
   {
@@ -51,11 +93,6 @@
     "date": "2026-01-09",
     "price": 9100,
     "note": "持平",
-    "is_sinopec": true
-  },
-  {
-    "date": "2026-01-09",
-    "price": 9100,
     "is_sinopec": true
   }
 ]
