@@ -12,6 +12,7 @@ import hashlib
 import subprocess
 import smtplib
 import re
+import urllib.parse
 from email.mime.text import MIMEText
 from email.header import Header
 
@@ -60,12 +61,7 @@ def get_sinopec_factory_price():
             
             # 必须包含 detail 且包含日期关键词
             if "detail-" in href and today_md in text and "中石化" in text and "丁二烯" in text:
-                target_url = href
-                if not target_url.startswith('http'):
-                    if target_url.startswith('/'):
-                        target_url = "https://www.100ppi.com" + target_url
-                    else:
-                        target_url = "https://www.100ppi.com/" + target_url
+                target_url = urllib.parse.urljoin(list_url, href)
                 break
         
         if not target_url:
@@ -183,12 +179,7 @@ def get_natural_rubber_price():
             
             # 必须包含 detail 且包含日期关键词 (天然橡胶商品报价动态)
             if "detail-" in href and "天然橡胶" in text and "报价动态" in text and date_pattern in text:
-                target_url = href
-                if not target_url.startswith('http'):
-                    if target_url.startswith('/'):
-                        target_url = "https://www.100ppi.com" + target_url
-                    else:
-                        target_url = "https://www.100ppi.com/" + target_url
+                target_url = urllib.parse.urljoin(list_url, href)
                 break
         
         if not target_url:
@@ -516,8 +507,12 @@ def send_notification(html_content):
     title = f"📢 丁二烯价格更新 ({datetime.now(tz).strftime('%H:%M')})"
     try:
         resp = requests.post("http://www.pushplus.plus/send", json={"token": PUSHPLUS_TOKEN, "title": title, "content": html_content, "template": "html"}, timeout=20)
+        if resp.status_code != 200:
+            print(f"微信推送返回非 200 响应: {resp.text}")
         return resp.status_code == 200
-    except: return False
+    except Exception as e:
+        print(f"微信推送异常: {e}")
+        return False
 
 def send_email_notification(html_content):
     """通过 SMTP 发送 QQ 邮件通知"""
@@ -536,6 +531,7 @@ def send_email_notification(html_content):
         return True
     except Exception as e:
         if "(-1," in str(e): return True
+        print(f"邮件推送异常: {e}")
         return False
 
 def main():
@@ -556,7 +552,7 @@ def main():
     # --- 任务 1: 中石化丁二烯专场 ---
     sinopec_triggered = False
     if records.get("sinopec_done_date") != today_str:
-        if 9 <= now.hour <= 17: # 扩大测试窗口
+        if 9 <= now.hour <= 23: # 扩大测试窗口
             print("正在监测中石化丁二烯报价...")
             sinopec_data = get_sinopec_factory_price()
             if sinopec_data:
@@ -578,7 +574,7 @@ def main():
     # --- 任务 2: 天然橡胶专场 ---
     nr_triggered = False
     if records.get("nr_done_date") != today_str:
-        if 9 <= now.hour <= 17: # 与中石化窗口一致
+        if 9 <= now.hour <= 23: # 与中石化窗口一致
             print("正在监测天然橡胶当日动态...")
             nr_data = get_natural_rubber_price()
             if nr_data:
