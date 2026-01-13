@@ -94,5 +94,10 @@
     "price": 9100,
     "note": "持平",
     "is_sinopec": true
+  },
+  {
+    "date": "2026-01-13",
+    "price": 9200,
+    "is_sinopec": true
   }
 ]

@@ -1,14 +1,6 @@
 {
-  "date": "2026-01-12",
-  "hashes": [
-    "568babab4057a999647e8071820af77d",
-    "3e95273e062a7aeed25194ddb5a46532",
-    "88043bf4eb9c8db61662734c26947fbf",
-    "4d74211286a35786bdd4b24cbd4a4ccf",
-    "c67d360a7120cc4a216ac21a81c6e070",
-    "5c2bfd2d41d77997818721a82e2b3565",
-    "02d57b7160291d9995169ca93e5c84ec"
-  ],
-  "sinopec_done_date": "2026-01-09",
+  "date": "2026-01-13",
+  "hashes": [],
+  "sinopec_done_date": "2026-01-13",
   "nr_done_date": "2026-01-09"
 }
