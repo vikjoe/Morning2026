@@ -109,5 +109,10 @@
     "date": "2026-01-15",
     "price": 9550,
     "is_sinopec": true
+  },
+  {
+    "date": "2026-01-16",
+    "price": 9550,
+    "is_sinopec": true
   }
 ]
